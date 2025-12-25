@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow authenticated users to read their own user document
+    match /users/{userId} {
+      allow read: if request.auth.uid == userId;
+      allow write: if request.auth.uid == userId && resource.data.role == request.resource.data.role; // Prevent privilege escalation
+    }
+
+    // Tickets collection rules
+    match /tickets/{ticketId} {
+      // Students: Can create tickets
+      allow create: if request.auth != null && 
+                       request.resource.data.userId == request.auth.uid &&
+                       request.resource.data.userEmail == request.auth.token.email;
+      
+      // Students: Can read only their own tickets
+      allow read: if request.auth != null && 
+                     (resource.data.userId == request.auth.uid || 
+                      get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin');
+      
+      // Students: Can update only specific fields in their own tickets (not status, category, urgency)
+      allow update: if request.auth != null && 
+                       resource.data.userId == request.auth.uid &&
+                       !request.resource.data.diff(resource.data).affectedKeys().hasAny(['status', 'category', 'urgency', 'summary', 'userId']);
+      
+      // Admins: Can read and update all tickets
+      allow read, update: if request.auth != null && 
+                             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin';
+      
+      // Never allow delete on either role (soft deletes only if needed)
+      allow delete: if false;
+    }
+
+    // Default deny all
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
